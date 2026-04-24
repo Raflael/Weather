@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>STRATOS — Weather</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@300;400;600;700;900&family=Barlow:wght@300;400;500&family=Share+Tech+Mono&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --c-sky:    #050d1a;
+      --c-mid:    #091428;
+      --c-deep:   #03080f;
+      --c-accent: #00d4ff;
+      --c-gold:   #f0a500;
+      --c-warm:   #ff6b35;
+      --c-white:  #e8f4ff;
+      --c-muted:  rgba(180,220,255,0.45);
+      --c-dim:    rgba(120,180,255,0.2);
+      --c-line:   rgba(0,212,255,0.15);
+      --r: 0,212,255;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin:0; padding:0; }
+    html { height:100%; }
+
+    body {
+      font-family: 'Barlow', sans-serif;
+      background: var(--c-deep);
+      color: var(--c-white);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem 3rem;
+      overflow-x: hidden;
+      cursor: none;
+    }
+
+    /* ── Custom cursor ── */
+    #cursor {
+      position: fixed;
+      width: 10px; height: 10px;
+      background: var(--c-accent);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 9999;
+      transform: translate(-50%,-50%);
+      transition: transform 0.08s, width 0.2s, height 0.2s, opacity 0.2s;
+      mix-blend-mode: screen;
+    }
+    #cursor-ring {
+      position: fixed;
+      width: 36px; height: 36px;
+      border: 1px solid rgba(0,212,255,0.5);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 9998;
+      transform: translate(-50%,-50%);
+      transition: transform 0.18s ease-out, width 0.25s, height 0.25s;
+    }
+
+    /* ── Canvas nebula bg ── */
+    #bg-canvas {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+    }
+
+    /* ── Grid overlay ── */
+    .grid-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      background-image:
+        linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+      pointer-events: none;
+    }
+
+    /* ── Scan line effect ── */
+    .scanlines {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.04) 2px,
+        rgba(0,0,0,0.04) 4px
+      );
+      pointer-events: none;
+    }
+
+    /* ── Vignette ── */
+    .vignette {
+      position: fixed;
+      inset: 0;
+      z-index: 3;
+      background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.7) 100%);
+      pointer-events: none;
+    }
+
+    /* ── Main layout ── */
+    .shell {
+      position: relative;
+      z-index: 10;
+      width: 100%;
+      max-width: 540px;
+    }
+
+    /* ── Header ── */
+    .hdr {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 3rem;
+      animation: fadeSlideDown 0.8s cubic-bezier(.2,.8,.2,1) both;
+    }
+
+    .hdr-left {}
+
+    .hdr-label {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.65rem;
+      letter-spacing: 0.3em;
+      color: var(--c-accent);
+      text-transform: uppercase;
+      margin-bottom: 0.35rem;
+      opacity: 0.8;
+    }
+
+    .hdr-title {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 4.5rem;
+      font-weight: 900;
+      letter-spacing: 6px;
+      line-height: 0.85;
+      text-transform: uppercase;
+      color: var(--c-white);
+      text-shadow: 0 0 40px rgba(0,212,255,0.4), 0 0 80px rgba(0,212,255,0.15);
+    }
+
+    .hdr-sub {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.58rem;
+      letter-spacing: 0.2em;
+      color: var(--c-muted);
+      margin-top: 0.5rem;
+    }
+
+    .hdr-right {
+      text-align: right;
+      padding-top: 0.25rem;
+    }
+
+    .hdr-time {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.7rem;
+      color: var(--c-accent);
+      letter-spacing: 0.1em;
+      opacity: 0.7;
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 6px; height: 6px;
+      background: #00ff88;
+      border-radius: 50%;
+      margin-right: 6px;
+      animation: blink 2s ease-in-out infinite;
+      box-shadow: 0 0 8px #00ff88;
+    }
+
+    @keyframes blink {
+      0%,100% { opacity: 1; }
+      50%      { opacity: 0.3; }
+    }
+
+    /* ── Search panel ── */
+    .search-panel {
+      position: relative;
+      margin-bottom: 1.5rem;
+      animation: fadeSlideUp 0.8s cubic-bezier(.2,.8,.2,1) 0.1s both;
+    }
+
+    .search-border {
+      position: relative;
+      border: 1px solid var(--c-line);
+      border-radius: 4px;
+      background: rgba(0,10,25,0.7);
+      backdrop-filter: blur(20px);
+      overflow: hidden;
+    }
+
+    /* animated top border */
+    .search-border::before {
+      content: '';
+      position: absolute;
+      top: 0; left: -100%;
+      width: 100%; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--c-accent), transparent);
+      animation: scanBar 3s linear infinite;
+    }
+
+    @keyframes scanBar {
+      to { left: 100%; }
+    }
+
+    .search-inner {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+    }
+
+    .search-prefix {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.75rem;
+      color: var(--c-accent);
+      padding: 0 1rem;
+      display: flex;
+      align-items: center;
+      border-right: 1px solid var(--c-line);
+      letter-spacing: 0.1em;
+      opacity: 0.7;
+      white-space: nowrap;
+    }
+
+    .search-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--c-white);
+      font-family: 'Barlow', sans-serif;
+      font-size: 1.05rem;
+      font-weight: 400;
+      padding: 1.1rem 1.25rem;
+      outline: none;
+      letter-spacing: 0.05em;
+    }
+    .search-input::placeholder {
+      color: rgba(120,180,255,0.3);
+      font-style: italic;
+    }
+
+    .search-btn {
+      background: var(--c-accent);
+      border: none;
+      color: #020810;
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      padding: 0 1.75rem;
+      cursor: none;
+      transition: background 0.2s, letter-spacing 0.2s;
+      clip-path: polygon(12px 0%, 100% 0%, 100% 100%, 0% 100%);
+    }
+    .search-btn:hover {
+      background: #33dfff;
+      letter-spacing: 0.25em;
+    }
+    .search-btn:disabled { opacity: 0.4; }
+
+    /* corner accents */
+    .corner {
+      position: absolute;
+      width: 10px; height: 10px;
+      border-color: var(--c-accent);
+      border-style: solid;
+      opacity: 0.6;
+    }
+    .corner-tl { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
+    .corner-tr { top: -1px; right: -1px; border-width: 1px 1px 0 0; }
+    .corner-bl { bottom: -1px; left: -1px; border-width: 0 0 1px 1px; }
+    .corner-br { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+
+    /* ── Error ── */
+    #errorMsg {
+      display: none;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.8rem;
+      color: #ff5555;
+      letter-spacing: 0.1em;
+      padding: 0.85rem 1.25rem;
+      border: 1px solid rgba(255,60,60,0.2);
+      border-left: 3px solid #ff5555;
+      background: rgba(255,30,30,0.06);
+      margin-bottom: 1.25rem;
+      animation: fadeIn 0.3s ease both;
+    }
+    #errorMsg::before { content: '// ERROR: '; opacity: 0.5; }
+
+    /* ── Loading ── */
+    #loading {
+      display: none;
+      padding: 3rem 0;
+      text-align: center;
+      animation: fadeIn 0.3s ease both;
+    }
+
+    .radar {
+      width: 80px; height: 80px;
+      margin: 0 auto 1.5rem;
+      position: relative;
+    }
+    .radar-ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 1px solid rgba(0,212,255,0.2);
+    }
+    .radar-ring:nth-child(2) { inset: 15px; border-color: rgba(0,212,255,0.15); }
+    .radar-ring:nth-child(3) { inset: 30px; border-color: rgba(0,212,255,0.1); }
+    .radar-sweep {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: conic-gradient(from 0deg, transparent 0deg, rgba(0,212,255,0.35) 60deg, transparent 61deg);
+      animation: sweep 1.4s linear infinite;
+    }
+    @keyframes sweep { to { transform: rotate(360deg); } }
+    .radar-dot {
+      position: absolute;
+      width: 6px; height: 6px;
+      background: var(--c-accent);
+      border-radius: 50%;
+      top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      box-shadow: 0 0 10px var(--c-accent);
+    }
+
+    .loading-text {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.25em;
+      color: var(--c-accent);
+      text-transform: uppercase;
+      animation: textPulse 1.4s ease-in-out infinite;
+    }
+    @keyframes textPulse {
+      0%,100% { opacity: 0.4; }
+      50%      { opacity: 1; }
+    }
+
+    /* ── Weather card ── */
+    #weatherCard {
+      display: none;
+      animation: cardReveal 0.7s cubic-bezier(.2,.8,.2,1) both;
+    }
+
+    @keyframes cardReveal {
+      from { opacity:0; transform: translateY(24px) scale(0.97); }
+      to   { opacity:1; transform: translateY(0) scale(1); }
+    }
+
+    .card-wrap {
+      position: relative;
+      border: 1px solid var(--c-line);
+      border-radius: 4px;
+      overflow: hidden;
+      background: rgba(2,8,20,0.85);
+      backdrop-filter: blur(30px);
+    }
+
+    /* Dynamic color stripe at top based on temp */
+    .card-stripe {
+      height: 3px;
+      background: linear-gradient(90deg, var(--c-accent), var(--stripe-end, #00d4ff));
+      transition: background 1s ease;
+    }
+
+    /* ── Hero section ── */
+    .hero {
+      padding: 2rem 2rem 1.5rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* big decorative temp number behind content */
+    .hero-ghost {
+      position: absolute;
+      right: -20px; top: -30px;
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 18rem;
+      font-weight: 900;
+      line-height: 1;
+      color: rgba(0,212,255,0.03);
+      letter-spacing: -10px;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 1.75rem;
+    }
+
+    .location-block {}
+
+    .loc-tag {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.6rem;
+      letter-spacing: 0.3em;
+      color: var(--c-accent);
+      text-transform: uppercase;
+      margin-bottom: 0.5rem;
+      opacity: 0.7;
+    }
+
+    .city-name {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 3rem;
+      font-weight: 900;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      line-height: 0.9;
+      color: var(--c-white);
+    }
+
+    .country-row {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-top: 0.6rem;
+    }
+
+    .country-chip {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.65rem;
+      letter-spacing: 0.2em;
+      color: var(--c-accent);
+      border: 1px solid rgba(0,212,255,0.3);
+      padding: 0.2rem 0.6rem;
+      clip-path: polygon(6px 0%, 100% 0%, calc(100% - 6px) 100%, 0% 100%);
+      background: rgba(0,212,255,0.05);
+    }
+
+    .coord-text {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.55rem;
+      color: var(--c-muted);
+      letter-spacing: 0.1em;
+    }
+
+    .icon-block {
+      position: relative;
+    }
+
+    .icon-bg {
+      position: absolute;
+      inset: -20px;
+      background: radial-gradient(circle, rgba(0,212,255,0.08) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .wx-icon {
+      width: 100px; height: 100px;
+      filter: drop-shadow(0 0 20px rgba(0,212,255,0.5)) drop-shadow(0 0 40px rgba(0,212,255,0.2));
+      animation: iconFloat 5s ease-in-out infinite;
+      position: relative;
+    }
+    @keyframes iconFloat {
+      0%,100% { transform: translateY(0) rotate(-2deg); }
+      50%      { transform: translateY(-10px) rotate(2deg); }
+    }
+
+    /* ── Temp display ── */
+    .temp-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 1rem;
+    }
+
+    .temp-main {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 8rem;
+      font-weight: 900;
+      line-height: 0.85;
+      letter-spacing: -4px;
+      color: var(--c-white);
+      text-shadow: 0 0 60px rgba(0,212,255,0.3);
+    }
+
+    .temp-unit {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 2rem;
+      font-weight: 300;
+      color: var(--c-muted);
+      margin-bottom: 1rem;
+      letter-spacing: 2px;
+    }
+
+    .temp-right {
+      margin-bottom: 0.85rem;
+      flex: 1;
+    }
+
+    .desc-text {
+      font-family: 'Barlow', sans-serif;
+      font-size: 0.9rem;
+      font-weight: 300;
+      color: var(--c-muted);
+      text-transform: capitalize;
+      letter-spacing: 0.1em;
+      margin-bottom: 0.5rem;
+    }
+
+    .feels-row {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.65rem;
+      color: var(--c-dim);
+      letter-spacing: 0.1em;
+    }
+
+    .feels-val {
+      color: var(--c-gold);
+      font-size: 0.8rem;
+    }
+
+    /* ── Divider ── */
+    .hline {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--c-line) 30%, var(--c-line) 70%, transparent);
+      margin: 0 2rem;
+    }
+
+    /* ── Stats grid ── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: rgba(0,212,255,0.06);
+    }
+
+    .stat-cell {
+      background: rgba(2,8,20,0.9);
+      padding: 1.4rem 1.75rem;
+      position: relative;
+      overflow: hidden;
+      transition: background 0.2s;
+    }
+    .stat-cell:hover {
+      background: rgba(0,212,255,0.04);
+    }
+
+    /* decorative corner on each cell */
+    .stat-cell::after {
+      content: '';
+      position: absolute;
+      bottom: 0; right: 0;
+      width: 20px; height: 20px;
+      border-bottom: 1px solid var(--c-line);
+      border-right: 1px solid var(--c-line);
+    }
+
+    .sc-label {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.58rem;
+      letter-spacing: 0.25em;
+      color: rgba(0,212,255,0.4);
+      text-transform: uppercase;
+      margin-bottom: 0.6rem;
+    }
+
+    .sc-val {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 2.8rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      line-height: 1;
+      color: var(--c-white);
+    }
+
+    .sc-unit {
+      font-size: 1.1rem;
+      font-weight: 300;
+      color: var(--c-muted);
+      margin-left: 2px;
+    }
+
+    .sc-bar {
+      height: 2px;
+      border-radius: 0;
+      background: var(--c-dim);
+      margin-top: 0.7rem;
+      overflow: hidden;
+    }
+    .sc-bar-fill {
+      height: 100%;
+      background: var(--c-accent);
+      transition: width 1s cubic-bezier(.4,0,.2,1);
+      box-shadow: 0 0 8px var(--c-accent);
+    }
+    .sc-bar-fill.warm { background: var(--c-gold); box-shadow: 0 0 8px var(--c-gold); }
+
+    /* ── Footer band ── */
+    .card-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.85rem 1.75rem;
+      border-top: 1px solid rgba(0,212,255,0.06);
+      background: rgba(0,212,255,0.02);
+    }
+
+    .footer-tag {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.58rem;
+      letter-spacing: 0.2em;
+      color: rgba(120,180,255,0.3);
+      text-transform: uppercase;
+    }
+
+    .footer-live {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.58rem;
+      letter-spacing: 0.15em;
+      color: #00ff88;
+      opacity: 0.6;
+    }
+
+    /* ── Page footer ── */
+    .pg-footer {
+      margin-top: 2rem;
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      max-width: 540px;
+      animation: fadeIn 1s ease 0.5s both;
+    }
+
+    .pg-footer span {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.58rem;
+      letter-spacing: 0.2em;
+      color: rgba(120,180,255,0.2);
+      text-transform: uppercase;
+    }
+
+    /* ── Animations ── */
+    @keyframes fadeSlideDown {
+      from { opacity:0; transform:translateY(-16px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    @keyframes fadeSlideUp {
+      from { opacity:0; transform:translateY(16px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    @keyframes fadeIn {
+      from { opacity:0; }
+      to   { opacity:1; }
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 480px) {
+      .hdr-title     { font-size: 3.2rem; }
+      .temp-main     { font-size: 6rem; }
+      .city-name     { font-size: 2.2rem; }
+      .wx-icon       { width: 72px; height: 72px; }
+      .hero-ghost    { font-size: 12rem; }
+      .search-prefix { display: none; }
+      .search-btn    { padding: 0 1.1rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Custom cursor -->
+  <div id="cursor"></div>
+  <div id="cursor-ring"></div>
+
+  <!-- Background canvas -->
+  <canvas id="bg-canvas"></canvas>
+
+  <!-- Overlays -->
+  <div class="grid-overlay"></div>
+  <div class="scanlines"></div>
+  <div class="vignette"></div>
+
+  <div class="shell">
+
+    <!-- Header -->
+    <div class="hdr">
+      <div class="hdr-left">
+        <div class="hdr-label">// Sistema de monitoramento atmosférico</div>
+        <div class="hdr-title">STRATOS</div>
+        <div class="hdr-sub">WEATHER INTELLIGENCE v2.4.1 — DEV WEB III</div>
+      </div>
+      <div class="hdr-right">
+        <div class="hdr-time" id="clock">--:--:--</div>
+        <div style="margin-top:0.5rem; font-family:'Share Tech Mono',monospace; font-size:0.6rem; color:rgba(120,180,255,0.4); letter-spacing:0.1em;">
+          <span class="status-dot"></span>ONLINE
+        </div>
+      </div>
+    </div>
+
+    <!-- Search -->
+    <div class="search-panel">
+      <div class="search-border">
+        <div class="corner corner-tl"></div>
+        <div class="corner corner-tr"></div>
+        <div class="corner corner-bl"></div>
+        <div class="corner corner-br"></div>
+        <div class="search-inner">
+          <div class="search-prefix">LOC_QUERY</div>
+          <input class="search-input" id="cityInput" type="text"
+                 placeholder="insira o nome da cidade..." autocomplete="off"/>
+          <button class="search-btn" id="searchBtn" onclick="buscarClima()">SCAN</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error -->
+    <div id="errorMsg"></div>
+
+    <!-- Loading -->
+    <div id="loading">
+      <div class="radar">
+        <div class="radar-ring"></div>
+        <div class="radar-ring"></div>
+        <div class="radar-ring"></div>
+        <div class="radar-sweep"></div>
+        <div class="radar-dot"></div>
+      </div>
+      <div class="loading-text">adquirindo sinal...</div>
+    </div>
+
+    <!-- Weather card -->
+    <div id="weatherCard">
+      <div class="card-wrap">
+        <div class="card-stripe" id="cardStripe"></div>
+
+        <div class="hero">
+          <div class="hero-ghost" id="ghostTemp"></div>
+
+          <div class="hero-top">
+            <div class="location-block">
+              <div class="loc-tag">// localização confirmada</div>
+              <div class="city-name" id="wCity"></div>
+              <div class="country-row">
+                <div class="country-chip" id="wCountry"></div>
+                <div class="coord-text" id="wCoord">—</div>
+              </div>
+            </div>
+            <div class="icon-block">
+              <div class="icon-bg"></div>
+              <img class="wx-icon" id="wIcon" src="" alt=""/>
+            </div>
+          </div>
+
+          <div class="temp-row">
+            <div class="temp-main" id="wTemp"></div>
+            <div class="temp-unit">°C</div>
+            <div class="temp-right">
+              <div class="desc-text" id="wDesc"></div>
+              <div class="feels-row">
+                SENSAÇÃO &nbsp;<span class="feels-val" id="wFeels"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hline"></div>
+
+        <div class="stats-grid">
+          <div class="stat-cell">
+            <div class="sc-label">// umidade relativa</div>
+            <div class="sc-val" id="wHumVal">—<span class="sc-unit">%</span></div>
+            <div class="sc-bar"><div class="sc-bar-fill" id="humBar" style="width:0%"></div></div>
+          </div>
+          <div class="stat-cell">
+            <div class="sc-label">// sensação térmica</div>
+            <div class="sc-val" id="wFeelsVal">—<span class="sc-unit">°</span></div>
+            <div class="sc-bar"><div class="sc-bar-fill warm" id="feelBar" style="width:0%"></div></div>
+          </div>
+        </div>
+
+        <div class="card-footer">
+          <div class="footer-tag">SRC: OPENWEATHERMAP API</div>
+          <div class="footer-live">
+            <span class="status-dot"></span> DADOS AO VIVO
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Page footer -->
+    <div class="pg-footer">
+      <span>STRATOS © 2025</span>
+      <span>FATEC — Desenvolvimento Web III</span>
+    </div>
+  </div>
+
+  <script>
+    /* ── Clock ── */
+    function tick() {
+      const n = new Date();
+      document.getElementById('clock').textContent =
+        n.toTimeString().slice(0,8);
+    }
+    tick(); setInterval(tick, 1000);
+
+    /* ── Custom cursor ── */
+    const cur = document.getElementById('cursor');
+    const curRing = document.getElementById('cursor-ring');
+    document.addEventListener('mousemove', e => {
+      cur.style.left = e.clientX + 'px';
+      cur.style.top  = e.clientY + 'px';
+      curRing.style.left = e.clientX + 'px';
+      curRing.style.top  = e.clientY + 'px';
+    });
+
+    /* ── Nebula canvas ── */
+    (function() {
+      const canvas = document.getElementById('bg-canvas');
+      const ctx    = canvas.getContext('2d');
+      let W, H, stars = [], nebulas = [];
+
+      function resize() {
+        W = canvas.width  = window.innerWidth;
+        H = canvas.height = window.innerHeight;
+      }
+      window.addEventListener('resize', resize);
+      resize();
+
+      /* stars */
+      for (let i = 0; i < 220; i++) {
+        stars.push({
+          x: Math.random(), y: Math.random(),
+          r: Math.random() * 1.2 + 0.2,
+          a: Math.random(),
+          speed: Math.random() * 0.0004 + 0.0001,
+          phase: Math.random() * Math.PI * 2
+        });
+      }
+
+      /* nebula blobs */
+      const colors = [
+        [0, 212, 255],
+        [100, 180, 255],
+        [0, 80, 160],
+        [20, 60, 120],
+      ];
+      for (let i = 0; i < 6; i++) {
+        const c = colors[i % colors.length];
+        nebulas.push({
+          x: Math.random(), y: Math.random(),
+          rx: Math.random() * 0.35 + 0.15,
+          ry: Math.random() * 0.25 + 0.1,
+          a: Math.random() * 0.06 + 0.02,
+          r: c[0], g: c[1], b: c[2],
+          dx: (Math.random() - 0.5) * 0.00008,
+          dy: (Math.random() - 0.5) * 0.00006
+        });
+      }
+
+      let t = 0;
+      function draw() {
+        ctx.clearRect(0, 0, W, H);
+
+        /* deep bg */
+        const grad = ctx.createLinearGradient(0,0,0,H);
+        grad.addColorStop(0,  '#030a18');
+        grad.addColorStop(0.5,'#050d1f');
+        grad.addColorStop(1,  '#020810');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+
+        /* nebulas */
+        for (const n of nebulas) {
+          n.x += n.dx; n.y += n.dy;
+          if (n.x < -0.3) n.x = 1.3;
+          if (n.x > 1.3)  n.x = -0.3;
+          if (n.y < -0.3) n.y = 1.3;
+          if (n.y > 1.3)  n.y = -0.3;
+
+          const gx = ctx.createRadialGradient(
+            n.x*W, n.y*H, 0,
+            n.x*W, n.y*H, Math.max(n.rx*W, n.ry*H)
+          );
+          gx.addColorStop(0,   `rgba(${n.r},${n.g},${n.b},${n.a})`);
+          gx.addColorStop(0.5, `rgba(${n.r},${n.g},${n.b},${n.a*0.3})`);
+          gx.addColorStop(1,   `rgba(${n.r},${n.g},${n.b},0)`);
+          ctx.save();
+          ctx.scale(1, n.ry / n.rx);
+          ctx.beginPath();
+          ctx.arc(n.x*W, (n.y*H) * (n.rx/n.ry), n.rx*W, 0, Math.PI*2);
+          ctx.fillStyle = gx;
+          ctx.fill();
+          ctx.restore();
+        }
+
+        /* stars */
+        for (const s of stars) {
+          const alpha = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(t * s.speed * 1000 + s.phase));
+          ctx.beginPath();
+          ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI*2);
+          ctx.fillStyle = `rgba(180,220,255,${alpha * s.a})`;
+          ctx.fill();
+        }
+
+        t += 0.016;
+        requestAnimationFrame(draw);
+      }
+      draw();
+    })();
+
+    /* ── Search ── */
+    const cityInput = document.getElementById('cityInput');
+    const searchBtn = document.getElementById('searchBtn');
+    const errorEl   = document.getElementById('errorMsg');
+    const loadingEl = document.getElementById('loading');
+    const cardEl    = document.getElementById('weatherCard');
+
+    cityInput.addEventListener('keydown', e => { if (e.key === 'Enter') buscarClima(); });
+
+    function hideAll() {
+      errorEl.style.display   = 'none';
+      loadingEl.style.display = 'none';
+      cardEl.style.display    = 'none';
+    }
+    function showError(msg) {
+      hideAll();
+      errorEl.textContent   = msg;
+      errorEl.style.display = 'block';
+    }
+
+    async function buscarClima() {
+      const city = cityInput.value.trim();
+      if (!city) { showError('nenhuma localização inserida'); return; }
+      hideAll();
+      loadingEl.style.display = 'block';
+      searchBtn.disabled = true;
+
+      try {
+        const res  = await fetch(`/api/weather?city=${encodeURIComponent(city)}`);
+        const data = await res.json();
+        if (!res.ok) { showError(data.error || 'erro desconhecido'); return; }
+
+        /* fill data */
+        document.getElementById('wCity').textContent    = data.city.toUpperCase();
+        document.getElementById('wCountry').textContent = data.country;
+        document.getElementById('wDesc').textContent    = data.description;
+        document.getElementById('wTemp').textContent    = data.temp;
+        document.getElementById('wFeels').textContent   = data.feels_like + '°C';
+        document.getElementById('ghostTemp').textContent = data.temp;
+        document.getElementById('wIcon').src            = data.icon;
+        document.getElementById('wIcon').alt            = data.description;
+
+        /* stat cells */
+        document.getElementById('wHumVal').innerHTML   = data.humidity + '<span class="sc-unit">%</span>';
+        document.getElementById('wFeelsVal').innerHTML = data.feels_like + '<span class="sc-unit">°</span>';
+
+        /* bars */
+        setTimeout(() => {
+          document.getElementById('humBar').style.width  = data.humidity + '%';
+          const feelPct = Math.min(100, Math.max(0, ((data.feels_like + 20) / 60) * 100));
+          document.getElementById('feelBar').style.width = feelPct + '%';
+        }, 100);
+
+        /* dynamic stripe color by temp */
+        const stripe = document.getElementById('cardStripe');
+        if (data.temp >= 35)       stripe.style.background = 'linear-gradient(90deg,#ff3b00,#ff6b35)';
+        else if (data.temp >= 25)  stripe.style.background = 'linear-gradient(90deg,#f0a500,#ffcc44)';
+        else if (data.temp >= 15)  stripe.style.background = 'linear-gradient(90deg,#00d4ff,#44eeff)';
+        else if (data.temp >= 5)   stripe.style.background = 'linear-gradient(90deg,#4488ff,#88aaff)';
+        else                       stripe.style.background = 'linear-gradient(90deg,#aaddff,#ddeeff)';
+
+        loadingEl.style.display = 'none';
+        cardEl.style.display    = 'block';
+      } catch (_) {
+        showError('falha de conexão com o servidor');
+      } finally {
+        searchBtn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
